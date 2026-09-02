@@ -1,0 +1,7 @@
+# python
+__pycache__/
+*.pyc
+# docker / env
+lab/.env
+# os
+.DS_Store

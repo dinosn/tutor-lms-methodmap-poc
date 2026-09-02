@@ -1,0 +1,70 @@
+# Tutor LMS <= 4.0.5 method_map unauth function-execution — self-contained lab.
+#
+#   docker compose up -d          # start MySQL + WordPress
+#   docker compose run --rm setup # provision WP + Tutor LMS 4.0.4 + a course (idempotent)
+#   # target: http://localhost:${WP_PORT:-8099}
+#   docker compose down -v        # tear down + delete volumes
+#
+# A DEFAULT theme + stock Tutor 4.0.4 reproduces BOTH exploit routes:
+#   front-end : GET  /courses/?course_filter=1&template=single-content-loader&data[...]
+#   admin-ajax: POST /wp-admin/admin-ajax.php  action=tutor_course_filter_ajax  (escalation scope)
+
+services:
+  db:
+    image: mariadb:10.11
+    environment:
+      MARIADB_DATABASE: wordpress
+      MARIADB_USER: wordpress
+      MARIADB_PASSWORD: wordpress
+      MARIADB_ROOT_PASSWORD: rootpass
+    volumes:
+      - db_data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  wp:
+    image: wordpress:6.6-php8.3-apache
+    depends_on:
+      db:
+        condition: service_healthy
+    ports:
+      - "${WP_PORT:-8099}:80"
+    environment:
+      WORDPRESS_DB_HOST: db
+      WORDPRESS_DB_USER: wordpress
+      WORDPRESS_DB_PASSWORD: wordpress
+      WORDPRESS_DB_NAME: wordpress
+      # deliberately vulnerable defaults for the lab (do NOT copy to prod)
+      WORDPRESS_DEBUG: "1"
+      WORDPRESS_CONFIG_EXTRA: |
+        define('WP_DEBUG_DISPLAY', true);
+        define('DISALLOW_FILE_MODS', false);
+    volumes:
+      - wp_data:/var/www/html
+
+  # one-shot provisioner (wp-cli) — shares the wp volume, talks to the same DB
+  setup:
+    image: wordpress:cli-php8.3
+    depends_on:
+      db:
+        condition: service_healthy
+      wp:
+        condition: service_started
+    user: "33:33"
+    environment:
+      WORDPRESS_DB_HOST: db
+      WORDPRESS_DB_USER: wordpress
+      WORDPRESS_DB_PASSWORD: wordpress
+      WORDPRESS_DB_NAME: wordpress
+      WP_PORT: "${WP_PORT:-8099}"
+    volumes:
+      - wp_data:/var/www/html
+      - ./setup.sh:/setup.sh:ro
+    entrypoint: ["bash", "/setup.sh"]
+
+volumes:
+  db_data:
+  wp_data:
